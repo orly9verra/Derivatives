@@ -1,0 +1,263 @@
+### Import des packages nécesaires à la réalisation du travail
+
+import numpy as np # Manipuler des matrices ou tableaux multidimensionnels, fonctions mathématiques 
+import os          # Changer le répertoire dans lequel nous exécutons actuellement notre code Python
+import matplotlib.pyplot as plt # ajouter des lignes, des images ou des textes aux axes d'un graphique
+import time        # Manipuler le temps dans un programme. 
+import numba       # Rendre plus performantes des portions de nos programmes.  
+
+from pandas import DataFrame # Manipulation et l'analyse des données, tableaux numériques et de séries temporelles.
+from scipy.sparse import csc_matrix # Calcul numérique haut niveau
+from scipy.stats import bernoulli   # Calcul numérique haut niveau
+from scipy.stats import norm        # Calcul numérique haut niveau
+from math import log, sqrt, exp # Calculs mathématiques 
+
+%matplotlib inline
+
+### Calcul des payoffs
+# les paramètres à utiliser pour l'exercice 
+K1  =120              # le prix d'exercice du déclenchement de l'option
+K   =110              # le prix d'exercice de l'option d'origine 
+K1  =100              # le prix d'exercice du déclenchement de l'option
+S   =110              # valeur initiale du cours du sous-jacent
+r   =0.05             # le taux d'intérêt sans risque 
+t   =0.5              # échéance de l'option en année 
+q   =0                # le revenu versé (ici supposé nul)
+sigma =0.09           # la volatilité du prix de l'action
+#N(.)                 # la fonction de répartition de la loi normale
+
+### CALCUL  Nous définissons d'abord les paramètres avec lesquels nous travaillerons 
+    
+N   = 6                          # le nombre de période 
+t   = 0.5                        # échéance de l'option en année 
+dt  = t / (N)                    # avec t le delta 
+K   = 120                        # le prix d'exercice de l'option d'origine 
+S0  = 110                        # valeur initiale du cours du sous-jacent
+r   = 0.05                       # le taux d'intérêt sans risque 
+q   = 0                          # le revenu versé (ici supposé nul)
+t   = 0.5                        # échéance en année 
+p   = 0.6                        # la probabilité d'un mouvement up
+sigma = 0.2                      # sigma représente la volatilité  
+
+###  # Calcul des paramètres u, p, d, dt
+u   = np.exp(sigma*np.sqrt(t))    # est la probabilité risque neutre de hausse du cours de l'actif support du contrat d'option
+d   = 1/u                         # est la probabilité risque neutre de baisse du cours de l'actif support du contrat d'option
+p   = (np.exp(r*t)-d)/(u-d)       # probabilité que s0 augmente  
+
+print("la probabilité risque neutre de hausse du cours est de", u)
+print("la probabilité risque neutre de baisse du cours est de", d)
+print("la probabilité (p) d'un mouvement up est de" ,p)
+print("delta t est de",dt)
+
+### Calcul des paramètres S_u, S_d, c
+
+S_u = u*S0                       # valeur de l'action à l'échéance lorsque le cours est à la hausse (pourcentage) 
+S_d = d*S0                       # valeur de l'action à l'échéance lorsque le cours est à la baisse (pourcentage)
+C_u = K-S_u                      # payoff du put 
+C_d = 0                          # valeur max quand le payoff du put est négatif
+c = np.exp(-r*t)*(p*C_u +(1-p)*C_d) # la valeur actuelle du  put (option) à t=0
+
+
+print("la valeur de l'action à l'échéance lorsque le cours est à la hausse est de",S_u)  
+print("la valeur de l'action à l'échéance lorsque le cours est à la baisse est de",S_d)
+print("la valeur actuelle du  put (option) à t=0 est de", c)
+
+def binomial_tree_putgap(N, T, S0, sigma, r, K, array_out = False ) :
+    # int
+    dt = T / (N)
+    u  = np.exp(sigma*np.sqrt(dt))       
+    d  = 1/u                             
+    p  = (np.exp(r*t)-d)/(u-d)  
+    
+    # price tree (calculate the stock price)
+
+    price_tree = np.zeros([N+1, N+1]) 
+
+    for i in range (N+1):
+        for j in range (i+1):
+            price_tree[j, i] = S0*(d**j)*(u**(i-j)) 
+        
+    # valeur de l'option 
+
+    option_putgap = np.zeros([N+1, N+1])
+    option_putgap[:,N] = np.maximum(np.zeros(N+1), K-price_tree[:,N])
+    
+    #calcul du prix de l'option à t=0
+
+    for i in np.arange(N-1, -1, -1):
+        for j in np.arange(0, i+1):        
+            option_putgap[j, i] = np.exp(-r*dt)*(p*option_putgap[j, i+1]+(1-p)*option_putgap[j+1, i+1])
+            
+    # return 
+    if array_out :
+        return [option_putgap[0, 0], price_tree, option_putgap]
+    else :
+        return option_putgap[0,0]
+
+  ### Les données sont rassemblées donc nous passons à la construction de l'arbre binomial à 6 périodes
+#binomial_tree_putgap(N=6, T=0.5, S0=110, sigma=0.09, r=0.05, K=120)
+arbre_a_6periodes = binomial_tree_putgap(6, 0.5, 110, 0.20, 0.05, 120, True )
+arbre_a_6periodes
+
+### 
+start_time = time.time()
+for i in range (1000):
+    binomial_tree_putgap(6, 0.5, 110, 0.2, 0.05, 120, True )
+    end_time = time.time()
+print(end_time-start_time)
+
+### 
+start_time = time.time()
+for i in range (1000):
+    binomial_tree_putgap(6, 0.5, 110, 0.2, 0.05, 120, True )
+    end_time = time.time()
+print(end_time-start_time)
+
+### CALCUL DU DELTA NEUTRE (DELTA HEDGE)
+
+
+    def d1_calc(N, t, S0, sigma, r, K):
+        return (np.log(S0/K) + (r+ 0.5*sigma**2)*t)/(sigma*np.sqrt(t))
+    def d2_calc(N, t, S0, sigma, r, K, T):
+        return d1_calc(N, t, S0, sigma, r, K)-sigma*np.sqrt(t)
+    
+    # Ensuite définissons ici le call option price function
+
+    def gap_call(N, t, S0, sigma, r, K): #( NB: pas besoin du gap_call dans cet exercice, nous l'avons présenté juste pour notre propre culture)
+        d1 = d1_calc(N, t, S0, sigma, r, K)
+        d2 = d1-sigma*np.sqrt(t)
+        return S0*norm.cdf(d1)-K * np.exp(-r*t)*norm.cdf(d2)
+    
+     # comme précédemment, nous définissons ici le put option price function
+    
+    def gap_put(N, t, S0, sigma, r, K):
+        return gap_call(N, t, S0, sigma, r, K) - S0 + np.exp(-r*(t))*K
+              
+    
+    # Calcul de delta hedge
+    
+    def delta(N, t, S0, sigma, r, K, otype):
+        d1 = d1_calc(N, t, S0, sigma, r, K)
+        d2 = d1-sigma*np.sqrt(t)
+        
+        if(otype == "call"):
+            delta = np.exp(-(t))*norm.cdf(d1)
+        elif(otype == "put"):
+            delta = -norm.cdf(-d1)
+        return delta  
+
+### Calcul 
+N = 6
+t=0.5
+S0=110
+sigma=0.2
+r=0.05
+K=120
+
+### 
+otype ="put"
+#print(gap_call(N, t, S0, sigma, r, K))   (pas besoin du gap_call dans cet exercice, nous l'avons présenté juste pour notre propre culture)
+print(gap_put(N, t, S0, sigma, r, K))
+print(delta(N, t, S0, sigma, r, K, otype))
+
+# Méthode de couverture 
+ST = 111
+# valeur du putjgap 
+valeur_put_2 =gap_put(N, t, S0, sigma, r, K) + delta(N, t, S0, sigma, r, K, otype)*(ST-S0)
+print(" la valeur du put est de" ,valeur_put_2)
+
+
+### 
+int(delta(N, t, S0, sigma, r, K, otype))
+
+stock_Call_a_payer = delta_arrondi*1000
+stock_Call_a_payer 
+
+a=(gap_put(N, t, S0, sigma, r, K)-valeur_put_2)*1000
+round(a,0)
+
+b=(stock_Call_a_payer*(ST-S0))
+round(b)
+
+# la valeur du portefeuille est de 
+valeur_portefeuille = a+b
+valeur_portefeuille 
+
+### Évaluation du prix de l'option par une méthode de Monte-Carlo
+# Monte Carlo
+S0 = 120
+K1 = 120
+K=110
+K2 = 100
+r = 0.05
+sigma = 0.20
+T = 0.5
+N = 252
+dt = T / N
+j=100000
+discount_factor = np.exp(-r * T)
+
+####  Mouvement brownien géométrique 
+def gen_paths(S0, r, sigma, T, M, I):
+    dt = float(T) / M
+    paths = np.zeros((M + 1, I), np.float64)
+    paths[0] = S0
+    for t in range(1, M + 1):
+        rand = np.random.standard_normal(I)
+        paths[t] = paths[t - 1] * np.exp((r - 0.5 * sigma ** 2) * dt + sigma * np.sqrt(dt) * rand)
+    return paths
+
+    # Le prix du sous-jacent
+paths = gen_paths(S0, r, sigma, T, N, i)
+np.average(paths[-1])
+
+fig, ax = plt.subplots(figsize=(12,8))
+plt.plot(paths[:,0:10])
+plt.grid()
+ax.set_xlabel('Jours_options')
+ax.set_ylabel('$S_t$')
+
+PutPayoffAverage = np.average(np.maximum(0, K-paths[-1]))
+PutPayoff = discount_factor * PutPayoffAverage 
+print(PutPayoff)
+
+## INFLUENCE DES PARAMETRES SUR LA VALEUR DE L'OPTION
+
+# Nous changeons dans cette partie les valeurs des paramètres et obtenons les résultats que nous avions stocké dans un tableau. Nous n'avons pas multiplier les codes à chaque cas.
+S0 = 120
+K=120
+r = 0.05
+sigma = 0.20
+T = 0.5
+N = 252
+dt = T / N
+j=100000
+discount_factor = np.exp(-r * T)
+
+# Mouvement brownien géométrique 
+def gen_paths(S0, r, sigma, T, M, I):
+    dt = float(T) / M
+    paths = np.zeros((M + 1, I), np.float64)
+    paths[0] = S0
+    for t in range(1, M + 1):
+        rand = np.random.standard_normal(I)
+        paths[t] = paths[t - 1] * np.exp((r - 0.5 * sigma ** 2) * dt + sigma * np.sqrt(dt) * rand)
+    return paths
+
+# Le prix du sous-jacent
+paths = gen_paths(S0, r, sigma, T, N, i)
+np.average(paths[-1])
+
+# Simulation
+
+fig, ax = plt.subplots(figsize=(12,8))
+plt.plot(paths[:,0:500])
+plt.grid()
+ax.set_xlabel('Jours_options')
+ax.set_ylabel('$S_t$')
+
+# La valeur de l'option
+
+PutPayoffAverage = np.average(np.maximum(0, K-paths[-1]))
+PutPayoff = discount_factor * PutPayoffAverage 
+print(PutPayoff)
